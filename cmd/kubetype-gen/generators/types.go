@@ -15,7 +15,10 @@
 package generators
 
 import (
+	"github.com/golang/glog"
 	"io"
+	"slices"
+	"strings"
 
 	"k8s.io/gengo/generator"
 	"k8s.io/gengo/namer"
@@ -49,6 +52,29 @@ func (g *typesGenerator) Imports(c *generator.Context) []string {
 	return g.imports.ImportLines()
 }
 
+// extracts values for Name and Package from "istiostatus-override" in the comments
+func statusOverrideFromComments(commentLines []string) (string, string, bool) {
+	// ServiceEntry has a unique status type which includes addresses for auto allocated IPs, substitute IstioServiceEntryStatus
+	// for IstioStatus when type is ServiceEntry
+	if index := slices.IndexFunc(commentLines, func(comment string) bool {
+		return strings.Contains(comment, istioStatusOveride)
+	}); index != -1 {
+		statusOverrideLine := commentLines[index]
+		glog.V(5).Infof("Found status override comment: %s", statusOverrideLine)
+		statusOverridSplit := strings.Split(statusOverrideLine, ":")
+		if len(statusOverridSplit) == 2 {
+			overrideName := statusOverridSplit[1]
+			return strings.TrimSpace(overrideName), "istio.io/api/meta/v1alpha1", true
+		} else if len(statusOverridSplit) == 4 {
+			overrideName := statusOverridSplit[2]
+			overridePackage := statusOverridSplit[3]
+			glog.V(5).Infof("name and package: %s:%s", overrideName, overridePackage)
+			return strings.TrimSpace(overrideName), strings.TrimSpace(overridePackage), true
+		}
+	}
+	return "", "", false
+}
+
 func (g *typesGenerator) GenerateType(c *generator.Context, t *types.Type, w io.Writer) error {
 	kubeTypes := g.source.KubeTypes(t)
 	sw := generator.NewSnippetWriter(w, c, "$", "$")
@@ -61,17 +87,25 @@ func (g *typesGenerator) GenerateType(c *generator.Context, t *types.Type, w io.
 		"IstioStatus": c.Universe.Type(types.Name{Name: "IstioStatus", Package: "istio.io/api/meta/v1alpha1"}),
 	}
 	for _, kubeType := range kubeTypes {
+		localM := m
+		// name, package, found := typeFromComments(kubeType.RawType().CommentLines)
+		if name, packageName, found := statusOverrideFromComments(kubeType.RawType().CommentLines); found {
+			localM["IstioStatus"] = c.Universe.Type(types.Name{Name: name, Package: packageName})
+		}
+
 		// make sure local types get imports generated for them to prevent reusing their local name for real imports,
 		// e.g. generating into package v1alpha1, while also importing from another package ending with v1alpha1.
 		// adding the import here will ensure the imports will be something like, precedingpathv1alpha1.
 		g.imports.AddType(kubeType.Type())
-		m["KubeType"] = kubeType
-		sw.Do(kubeTypeTemplate, m)
+		localM["KubeType"] = kubeType
+		sw.Do(kubeTypeTemplate, localM)
 	}
 	return sw.Error()
 }
 
-const kubeTypeTemplate = `
+const (
+	istioStatusOveride = `+kubetype-gen:istiostatus-override:`
+	kubeTypeTemplate   = `
 $- range .RawType.SecondClosestCommentLines $
 // $ . $
 $- end $
@@ -105,3 +139,4 @@ type $.KubeType.Type|public$List struct {
 	Items           []*$.KubeType.Type|raw$ ` + "`" + `json:"items" protobuf:"bytes,2,rep,name=items"` + "`" + `
 }
 `
+)
