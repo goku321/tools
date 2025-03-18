@@ -1,4 +1,4 @@
-module istio.io/tools
+module github.com/goku321/tools
 
 go 1.22
 
