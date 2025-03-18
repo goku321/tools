@@ -1,4 +1,4 @@
-module github.com/goku321/tools
+module istio.io/tools
 
 go 1.22
 
@@ -145,3 +145,8 @@ require (
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 )
+
+// Add this at the end of your go.mod file
+replace github.com/goku321/tools => github.com/goku321/tools v0.0.0-20250318184734-a4a245bf0194
+
+replace istio.io/tools => github.com/goku321/tools v0.0.0-20250318184734-a4a245bf0194
